@@ -5,8 +5,9 @@ var readline = require('readline')
 var Promise = require('bluebird')
 var exec = Promise.promisify (require('child_process').exec)
 
-var gaf2json = require('../lib/converters').gaf2json
-var obo2json = require('../lib/converters').obo2json
+var converters = require('../wtfgenes/lib/converters')
+var gaf2json = converters.gaf2json
+var obo2json = converters.obo2json
 
 var go_url_prefix = "http://geneontology.org/ontology/"
 var gaf_url_prefix = "http://geneontology.org/gene-associations/"
@@ -14,6 +15,7 @@ var gaf_url_prefix = "http://geneontology.org/gene-associations/"
 var go_url_suffix = "go-basic.obo"
 var gaf_metadata_url_suffix = "go_annotation_metadata.all.js"
 
+// not doing the uniprot mapping as it's too big; leaving it in, but commented out, for now
 // var uniprot_mapping_url = "ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/idmapping_selected.tab.gz"
 
 var metadata_url = gaf_url_prefix + gaf_metadata_url_suffix
@@ -21,6 +23,9 @@ var metadata_url = gaf_url_prefix + gaf_metadata_url_suffix
 function skip_id (id) {
   return /^goa_uniprot_all/.test(id) || /_complex$/.test(id) || /_rna$/.test(id) || id === 'jcvi'
 }
+
+var example_terms = ['GO:0006298',  // mismatch repair
+                     'GO:0000027']  // ribosomal large subunit assembly
 
 var deploy_dir = 'web'
 var gaf_subdir = 'gaf'
@@ -66,6 +71,7 @@ function download_data (url) {
 }
 
 // download GO
+var term_name = {}
 init_promise
   .then (() => download_data (go_url_prefix + go_url_suffix))
   .then (function (obo) {
@@ -74,6 +80,9 @@ init_promise
 			      compress: true,
 			      includeTermInfo: true })
     fs.writeFileSync (deploy_dir + '/' + go_path, JSON.stringify (go_json))
+    go_json.termParents.forEach (function (term_parents, n) {
+      term_name[term_parents[0]] = go_json.termInfo[n]
+    })
   })
 // download UniProt mapping
 // commented out because it's just too big
@@ -97,7 +106,18 @@ init_promise
               //                .then ((gaf_file) => get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename))
                 .then ((gaf_file) => quick_gaf2json (gaf_filename, gaf_file))
                 .then (function (gaf_json) {
-                  // process
+                  // examples
+                  var examples = example_terms.map (function (term) {
+                    var genes = gaf_json.idAliasTerm.filter (function (id_alias_term) {
+                      var has_term = false
+                      id_alias_term[2].forEach (function (gterm) {
+                        has_term = has_term || term === gterm
+                      })
+                      return has_term
+                    }).map (function (id_alias_term) { return id_alias_term[0] })
+                    return { name: term_name[term], genes: genes }
+                  }).filter (function (example) { return example.genes.length > 0 })
+                  // write
                   var gaf_path = gaf_subdir + '/' + resource.id + '.json'
                   fs.writeFileSync (deploy_dir + '/' + gaf_path, JSON.stringify (gaf_json))
                   return {
@@ -106,7 +126,7 @@ init_promise
                       { name: "Gene Ontology (basic)",
                         ontology: go_path,
                         assocs: gaf_path,
-                        examples: [] }
+                        examples: examples }
                     ]
                   }
                 })
@@ -123,6 +143,7 @@ function quick_gaf2json (gaf_filename, gaf_file) {
   return gaf2json ({ gaf: gaf_file })
 }
 
+// this function no longer used since uniprot mapping is commented out
 function get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename) {
   return new Promise (function (resolve, reject) {
     console.log ("processing " + gaf_filename)
