@@ -14,12 +14,12 @@ var gaf_url_prefix = "http://geneontology.org/gene-associations/"
 var go_url_suffix = "go-basic.obo"
 var gaf_metadata_url_suffix = "go_annotation_metadata.all.js"
 
-var uniprot_mapping_url = "ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/idmapping_selected.tab.gz"
+// var uniprot_mapping_url = "ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/idmapping_selected.tab.gz"
 
 var metadata_url = gaf_url_prefix + gaf_metadata_url_suffix
 
 function skip_id (id) {
-  return /^goa_uniprot_all/.test(id) || /_complex$/.test(id)
+  return /^goa_uniprot_all/.test(id) || /_complex$/.test(id) || /_rna$/.test(id) || id === 'jcvi'
 }
 
 var deploy_dir = 'web'
@@ -35,9 +35,9 @@ var init_promise = fs.existsSync(deploy_dir)
     ? Promise.resolve(true)
     : (exec("cp -r wtfgenes/web " + deploy_dir)
        .then (() => exec("cd " + deploy_dir + "; make"))
-       .then (() => exec("mkdir " + deploy_dir + '/' + gaf_subdir))
-       .then (() => exec("mkdir " + deploy_dir + '/' + go_subdir))
-       .then (() => exec("mkdir " + download_dir))
+       .then (() => exec("mkdir -p " + deploy_dir + '/' + gaf_subdir))
+       .then (() => exec("mkdir -p " + deploy_dir + '/' + go_subdir))
+       .then (() => exec("mkdir -p " + download_dir))
        .then (() => console.log("initialized " + deploy_dir + " and " + download_dir)))
 
 // wrappers to download-and-cache
@@ -76,8 +76,10 @@ init_promise
     fs.writeFileSync (deploy_dir + '/' + go_path, JSON.stringify (go_json))
   })
 // download UniProt mapping
-  .then (() => download_filename (uniprot_mapping_url))
-  .then ((uniprot_mapping_filename) => download_data (metadata_url)
+// commented out because it's just too big
+//  .then (() => download_filename (uniprot_mapping_url))
+//  .then ((uniprot_mapping_filename) => download_data (metadata_url)
+  .then (() => download_data (metadata_url)
          // download GAF metadata
          .then (function (html) {
            eval (html)  // defines global_go_annotation_metadata
@@ -91,7 +93,9 @@ init_promise
               // download each GAF file
               var gaf_filename = resource.gaf_filename
               return download_data (gaf_url_prefix + gaf_filename)
-                .then ((gaf_file) => get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename))
+              // commented out & replaced with simple gaf2json to avoid huge hit of processing uniprot ID map
+              //                .then ((gaf_file) => get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename))
+                .then ((gaf_file) => quick_gaf2json (gaf_filename, gaf_file))
                 .then (function (gaf_json) {
                   // process
                   var gaf_path = gaf_subdir + '/' + resource.id + '.json'
@@ -113,6 +117,11 @@ init_promise
            console.log ("done")
          })
         )
+
+function quick_gaf2json (gaf_filename, gaf_file) {
+  console.log ("processing " + gaf_filename)
+  return gaf2json ({ gaf: gaf_file })
+}
 
 function get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename) {
   return new Promise (function (resolve, reject) {
