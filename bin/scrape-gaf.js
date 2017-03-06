@@ -22,8 +22,9 @@ function skip_id (id) {
   return /^goa_uniprot_all/.test(id) || /_complex$/.test(id) || /_rna$/.test(id) || id === 'jcvi'
 }
 
-var example_terms = ['GO:0006298',  // mismatch repair
-                     'GO:0000027']  // ribosomal large subunit assembly
+var example_terms = [['GO:0006298'],  // mismatch repair
+                     ['GO:0000027'],  // ribosomal large subunit assembly
+                     ['GO:0004803','GO:0006302']]  // transposase activity + double-strand break repair
 
 var deploy_dir = 'web'
 var gaf_subdir = 'gaf'
@@ -82,11 +83,9 @@ init_promise
     go_json.termParents.forEach (function (term_parents, n) {
       var name = term_parents[0]
       term_name[name] = go_json.termInfo[n]
-      in_term_closure[name] = {}
-    })
-    go_json.termParents.forEach (function (term_parents, n) {
-      var name = term_parents[0]
-      trans[n].forEach ((c) => { in_term_closure[go_json.termParents[c][0]][name] = true })
+      var in_closure = {}
+      trans[n].forEach ((c) => { in_closure[go_json.termParents[c][0]] = true })
+      in_term_closure[name] = in_closure
     })
   })
   .then (() => download_data (metadata_url)
@@ -106,16 +105,21 @@ init_promise
                 .then ((gaf_file) => quick_gaf2json (gaf_filename, gaf_file))
                 .then (function (gaf_json) {
                   // examples
-                  var examples = example_terms.map (function (term) {
-                    var in_closure = in_term_closure[term]
+                  var examples = example_terms.map (function (terms) {
+                    var found_term = {}
                     var genes = gaf_json.idAliasTerm.filter (function (id_alias_term) {
                       var has_term = false
                       id_alias_term[2].forEach (function (gterm) {
-                        has_term = has_term || in_closure[gterm]
+                        terms.forEach (function (term) {
+                          if (in_term_closure[gterm][term])
+                            has_term = found_term[term] = true
+                        })
                       })
                       return has_term
                     }).map (function (id_alias_term) { return id_alias_term[0] })
-                    return { name: term_name[term], genes: genes }
+                    var name = terms.filter ((term) => found_term[term])
+                        .map ((term) => term_name[term]).join(" + ")
+                    return { name, genes }
                   }).filter (function (example) { return example.genes.length > 0 })
                   // write
                   var gaf_path = gaf_subdir + '/' + resource.id + '.json'
