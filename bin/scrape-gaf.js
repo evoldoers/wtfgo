@@ -6,6 +6,7 @@ var Promise = require('bluebird')
 var exec = Promise.promisify (require('child_process').exec)
 
 var converters = require('../wtfgenes/lib/converters')
+var Ontology = require('../wtfgenes/lib/ontology')
 var gaf2json = converters.gaf2json
 var obo2json = converters.obo2json
 
@@ -14,9 +15,6 @@ var gaf_url_prefix = "http://geneontology.org/gene-associations/"
 
 var go_url_suffix = "go-basic.obo"
 var gaf_metadata_url_suffix = "go_annotation_metadata.all.js"
-
-// not doing the uniprot mapping as it's too big; leaving it in, but commented out, for now
-// var uniprot_mapping_url = "ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/idmapping_selected.tab.gz"
 
 var metadata_url = gaf_url_prefix + gaf_metadata_url_suffix
 
@@ -71,7 +69,7 @@ function download_data (url) {
 }
 
 // download GO
-var term_name = {}
+var term_name = {}, in_term_closure = {}
 init_promise
   .then (() => download_data (go_url_prefix + go_url_suffix))
   .then (function (obo) {
@@ -80,14 +78,17 @@ init_promise
 			      compress: true,
 			      includeTermInfo: true })
     fs.writeFileSync (deploy_dir + '/' + go_path, JSON.stringify (go_json))
+    var go = new Ontology (go_json), trans = go.transitiveClosure()
     go_json.termParents.forEach (function (term_parents, n) {
-      term_name[term_parents[0]] = go_json.termInfo[n]
+      var name = term_parents[0]
+      term_name[name] = go_json.termInfo[n]
+      in_term_closure[name] = {}
+    })
+    go_json.termParents.forEach (function (term_parents, n) {
+      var name = term_parents[0]
+      trans[n].forEach ((c) => { in_term_closure[go_json.termParents[c][0]][name] = true })
     })
   })
-// download UniProt mapping
-// commented out because it's just too big
-//  .then (() => download_filename (uniprot_mapping_url))
-//  .then ((uniprot_mapping_filename) => download_data (metadata_url)
   .then (() => download_data (metadata_url)
          // download GAF metadata
          .then (function (html) {
@@ -102,16 +103,15 @@ init_promise
               // download each GAF file
               var gaf_filename = resource.gaf_filename
               return download_data (gaf_url_prefix + gaf_filename)
-              // commented out & replaced with simple gaf2json to avoid huge hit of processing uniprot ID map
-              //                .then ((gaf_file) => get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename))
                 .then ((gaf_file) => quick_gaf2json (gaf_filename, gaf_file))
                 .then (function (gaf_json) {
                   // examples
                   var examples = example_terms.map (function (term) {
+                    var in_closure = in_term_closure[term]
                     var genes = gaf_json.idAliasTerm.filter (function (id_alias_term) {
                       var has_term = false
                       id_alias_term[2].forEach (function (gterm) {
-                        has_term = has_term || term === gterm
+                        has_term = has_term || in_closure[gterm]
                       })
                       return has_term
                     }).map (function (id_alias_term) { return id_alias_term[0] })
@@ -140,37 +140,8 @@ init_promise
 
 function quick_gaf2json (gaf_filename, gaf_file) {
   console.log ("processing " + gaf_filename)
-  return gaf2json ({ gaf: gaf_file })
-}
-
-// this function no longer used since uniprot mapping is commented out
-function get_aliases (gaf_filename, gaf_file, uniprot_mapping_filename) {
-  return new Promise (function (resolve, reject) {
-    console.log ("processing " + gaf_filename)
-    var gaf_json_no_aliases = gaf2json ({ gaf: gaf_file })
-    // find all gene symbols
-    var is_symbol = {}
-    gaf_json_no_aliases.idAliasTerm.forEach (function (id_alias_term) {
-      is_symbol[id_alias_term[0]] = true
-      id_alias_term[1].forEach (function (alias) { is_symbol[alias] = true })
-    })
-    // scan through Uniprot ID map for aliases
-    var alias = []
-    var line_reader = readline.createInterface({
-      input: require('fs').createReadStream(uniprot_mapping_filename)
-    })
-    var re = /^(.*?) /;
-    line_reader.on ('line', function (line) {
-      var match = re.exec (line)
-      if (match && is_symbol[match[1]])
-        alias.push (line)
-    })
-    line_reader.on ('close', function() {
-      console.log ("finished " + gaf_filename + " (" + alias.length + " aliases)")
-      var aliases = alias.join('')
-      var gaf_json = gaf2json ({ aliases: aliases, gaf: gaf_file })
-      resolve (gaf_json)
-    })
-  })
+  var json = gaf2json ({ gaf: gaf_file,
+                         mergeDuplicates: true })
+  return json
 }
 
