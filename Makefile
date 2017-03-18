@@ -5,3 +5,8 @@ scrape: wtfgenes
 
 wtfgenes:
 	git clone git@github.com:evoldoers/wtfgenes.git
+
+clean:
+	rm -rf web
+
+build: clean wtfgenes scrape
