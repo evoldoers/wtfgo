@@ -111,7 +111,10 @@ init_promise
                       var has_term = false
                       id_alias_term[2].forEach (function (gterm) {
                         terms.forEach (function (term) {
-                          if (in_term_closure[gterm][term])
+                          if (!in_term_closure[gterm]) {
+                              console.warn("No term closure for "+gterm)
+                          }
+                          if (in_term_closure[gterm] && in_term_closure[gterm][term])
                             has_term = found_term[term] = true
                         })
                       })
